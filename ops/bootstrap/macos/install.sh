@@ -45,6 +45,7 @@ brew_install_if_missing docker install --cask docker || true
 brew_install_if_missing tailscale install --cask tailscale || true
 brew_install_if_missing jq install jq || true
 brew_install_if_missing curl install curl || true
+brew_install_if_missing restic install restic || true
 
 if ! have_cmd docker; then
   echo "docker is required"
@@ -64,6 +65,7 @@ fi
 record_version "docker" docker version
 record_version "docker compose" docker compose version
 record_version "tailscale" tailscale version
+record_version "restic" restic version
 
 {
   echo "## tailscale status"
@@ -71,4 +73,3 @@ record_version "tailscale" tailscale version
 } >> "${VERSIONS_FILE}"
 
 echo "install verification complete"
-

@@ -8,6 +8,14 @@ Back up durable control plane state and config artifacts:
 - Stack configuration under `stacks/`
 - Runbooks and operational scripts
 
+Primary operator entrypoint:
+
+```bash
+RESTIC_REPOSITORY=/path/to/restic-repo \
+RESTIC_PASSWORD_FILE=/path/to/restic-password \
+./ops/backups/restic/backup.sh
+```
+
 ## Recommended Targets
 
 - Postgres volume snapshot or logical dump
@@ -16,24 +24,32 @@ Back up durable control plane state and config artifacts:
 - Authelia SQLite database and notification file
 - Stack configuration files excluding `.env` and user secrets
 
+## What The Script Captures
+
+- Volume archives for Postgres, Redis, Prometheus, Loki, Grafana, and Authelia when the named volumes exist
+- A Postgres logical dump when the core stack is running
+- Stack definitions, runbooks, bootstrap scripts, and top-level contract docs
+- A receipt bundle under `receipts/<timestamp>/` with backup logs and Restic output
+
 ## Example Commands
 
-Create a Postgres dump:
+Initialize a new local Restic repository:
 
 ```bash
-docker compose -p jcn-core -f stacks/core/compose.yml exec -T postgres \
-  pg_dump -U "${POSTGRES_USER}" "${POSTGRES_DB}" > postgres.dump.sql
+mkdir -p .local/restic
+printf '%s\n' 'replace-this-password' > .local/restic/password.txt
+chmod 600 .local/restic/password.txt
+RESTIC_REPOSITORY="$(pwd)/.local/restic/repo" \
+RESTIC_PASSWORD_FILE="$(pwd)/.local/restic/password.txt" \
+restic init
 ```
 
-Run a Restic backup:
+Run the repository backup script:
 
 ```bash
-export RESTIC_REPOSITORY=/path/to/restic-repo
-export RESTIC_PASSWORD_FILE=/path/to/restic-password
-restic backup \
-  stacks \
-  runbooks \
-  postgres.dump.sql
+RESTIC_REPOSITORY="$(pwd)/.local/restic/repo" \
+RESTIC_PASSWORD_FILE="$(pwd)/.local/restic/password.txt" \
+./ops/backups/restic/backup.sh
 ```
 
 Check retention:
@@ -49,4 +65,3 @@ restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune
 - Monthly: 6
 - Validate restores quarterly
 - Keep the Restic repository outside the Mac mini boot disk when possible
-
