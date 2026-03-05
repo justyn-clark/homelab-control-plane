@@ -159,7 +159,14 @@ receipts/
 
 ## Boot Persistence
 
-The launchd asset lives at [ops/bootstrap/macos/launchd/com.jcn.controlplane.plist](/Users/justin/Documents/Justyn Clark Network/REPOS/homelab-control-plane/ops/bootstrap/macos/launchd/com.jcn.controlplane.plist). Install it as a LaunchDaemon or LaunchAgent according to your local Docker execution model. The plist writes deterministic logs under `receipts/launchd/`.
+The launchd asset lives at [ops/bootstrap/macos/launchd/com.jcn.controlplane.plist](/Users/justin/Documents/Justyn Clark Network/REPOS/homelab-control-plane/ops/bootstrap/macos/launchd/com.jcn.controlplane.plist). Use [ops/bootstrap/macos/install-launchd.sh](/Users/justin/Documents/Justyn Clark Network/REPOS/homelab-control-plane/ops/bootstrap/macos/install-launchd.sh) to render the plist with the current repo path, lint it, and install it as a user LaunchAgent with receipt output.
+
+```bash
+DRY_RUN=1 ./ops/bootstrap/macos/install-launchd.sh
+./ops/bootstrap/macos/install-launchd.sh
+```
+
+The installer writes deterministic runtime logs under `receipts/launchd/` and a timestamped install receipt under `receipts/<timestamp>/`.
 
 ## Runbooks
 
