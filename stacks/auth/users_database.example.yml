@@ -1,0 +1,7 @@
+users:
+  admin:
+    displayname: "JCN Admin"
+    email: "admin@example.internal"
+    password: "${AUTHELIA_PASSWORD_HASH}"
+    groups:
+      - admins

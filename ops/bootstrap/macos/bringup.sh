@@ -1,0 +1,154 @@
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+RECEIPT_TS="$(date -u +"%Y%m%dT%H%M%SZ")"
+RECEIPT_DIR="${REPO_ROOT}/receipts/${RECEIPT_TS}"
+LOG_FILE="${RECEIPT_DIR}/bringup.log"
+VERSIONS_FILE="${RECEIPT_DIR}/versions.txt"
+HEALTH_FILE="${RECEIPT_DIR}/healthchecks.txt"
+ENDPOINTS_FILE="${RECEIPT_DIR}/endpoints.txt"
+
+mkdir -p "${RECEIPT_DIR}" "${REPO_ROOT}/receipts/launchd"
+exec > >(tee -a "${LOG_FILE}") 2>&1
+
+STACKS=(
+  "core:${REPO_ROOT}/stacks/core/compose.yml:jcn-core"
+  "observability:${REPO_ROOT}/stacks/observability/compose.yml:jcn-observability"
+  "auth:${REPO_ROOT}/stacks/auth/compose.yml:jcn-auth"
+  "ingress:${REPO_ROOT}/stacks/ingress/compose.yml:jcn-ingress"
+)
+
+require_file() {
+  local path="$1"
+  if [[ ! -f "${path}" ]]; then
+    echo "missing required file: ${path}"
+    exit 1
+  fi
+}
+
+capture_versions() {
+  {
+    echo "## docker"
+    docker version
+    echo
+    echo "## docker compose"
+    docker compose version
+    echo
+    echo "## tailscale"
+    tailscale version || true
+    echo
+    echo "## tailscale ip"
+    tailscale ip -4 || true
+  } > "${VERSIONS_FILE}"
+}
+
+wait_for_docker() {
+  local tries=60
+  until docker info >/dev/null 2>&1; do
+    tries=$((tries - 1))
+    if [[ "${tries}" -le 0 ]]; then
+      echo "docker daemon did not become ready"
+      exit 1
+    fi
+    sleep 5
+  done
+}
+
+compose_ps() {
+  local stack_name="$1"
+  local compose_file="$2"
+  local project_name="$3"
+  docker compose -p "${project_name}" -f "${compose_file}" ps > "${RECEIPT_DIR}/stack-${stack_name}.ps.txt"
+}
+
+inspect_health() {
+  local project_name="$1"
+  local tries=30
+  while [[ "${tries}" -gt 0 ]]; do
+    local failed=0
+    while read -r container; do
+      [[ -z "${container}" ]] && continue
+      local status
+      status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${container}")"
+      echo "${container} ${status}" >> "${HEALTH_FILE}"
+      if [[ "${status}" != "healthy" && "${status}" != "running" ]]; then
+        failed=1
+      fi
+    done < <(docker ps --filter "label=com.docker.compose.project=${project_name}" --format '{{.Names}}')
+    if [[ "${failed}" -eq 0 ]]; then
+      return 0
+    fi
+    tries=$((tries - 1))
+    sleep 5
+  done
+  echo "health check timeout for project ${project_name}"
+  exit 1
+}
+
+http_check() {
+  local name="$1"
+  local host="$2"
+  local path="$3"
+  local expected="$4"
+  local bind_ip="$5"
+  local code
+  code="$(curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 15 --resolve "${host}:80:${bind_ip}" "http://${host}${path}")"
+  echo "${name} ${host}${path} expected=${expected} actual=${code}" >> "${HEALTH_FILE}"
+  if [[ "${code}" != "${expected}" ]]; then
+    echo "http health check failed for ${host}${path}: expected ${expected}, got ${code}"
+    exit 1
+  fi
+}
+
+echo "receipt_dir=${RECEIPT_DIR}"
+
+require_file "${REPO_ROOT}/stacks/core/.env"
+require_file "${REPO_ROOT}/stacks/observability/.env"
+require_file "${REPO_ROOT}/stacks/ingress/.env"
+require_file "${REPO_ROOT}/stacks/auth/.env"
+require_file "${REPO_ROOT}/stacks/auth/users_database.yml"
+
+wait_for_docker
+capture_versions
+
+docker network inspect jcn-controlplane >/dev/null 2>&1 || docker network create jcn-controlplane >/dev/null
+
+for entry in "${STACKS[@]}"; do
+  IFS=":" read -r stack_name compose_file project_name <<< "${entry}"
+  echo "starting ${stack_name}"
+  docker compose -p "${project_name}" -f "${compose_file}" up -d
+  compose_ps "${stack_name}" "${compose_file}" "${project_name}"
+  inspect_health "${project_name}"
+done
+
+TAILNET_BIND_IP="$(grep '^TAILNET_BIND_IP=' "${REPO_ROOT}/stacks/ingress/.env" | cut -d= -f2-)"
+if [[ -z "${TAILNET_BIND_IP}" ]]; then
+  echo "TAILNET_BIND_IP is not set"
+  exit 1
+fi
+
+http_check "auth-portal" "auth.internal" "/api/health" "200" "${TAILNET_BIND_IP}"
+http_check "grafana-gate" "grafana.internal" "/" "302" "${TAILNET_BIND_IP}"
+http_check "prometheus-gate" "prom.internal" "/" "302" "${TAILNET_BIND_IP}"
+http_check "loki-gate" "loki.internal" "/ready" "302" "${TAILNET_BIND_IP}"
+
+cat > "${ENDPOINTS_FILE}" <<EOF
+bind_ip=${TAILNET_BIND_IP}
+
+internal_hostnames:
+- auth.internal
+- grafana.internal
+- prom.internal
+- prometheus.internal
+- loki.internal
+
+test_commands:
+curl -I --resolve auth.internal:80:${TAILNET_BIND_IP} http://auth.internal/
+curl -I --resolve grafana.internal:80:${TAILNET_BIND_IP} http://grafana.internal/
+curl -I --resolve prom.internal:80:${TAILNET_BIND_IP} http://prom.internal/
+curl -I --resolve loki.internal:80:${TAILNET_BIND_IP} http://loki.internal/
+EOF
+
+echo "bringup complete"

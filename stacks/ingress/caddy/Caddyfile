@@ -1,0 +1,39 @@
+{
+  auto_https off
+  admin off
+}
+
+(authenticated) {
+  forward_auth authelia:9091 {
+    uri /api/authz/forward-auth
+    copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+  }
+}
+
+http://auth.internal {
+  reverse_proxy authelia:9091
+}
+
+http://grafana.internal {
+  import authenticated
+  reverse_proxy grafana:3000
+}
+
+http://prom.internal, http://prometheus.internal {
+  import authenticated
+  reverse_proxy prometheus:9090
+}
+
+http://loki.internal {
+  import authenticated
+  reverse_proxy loki:3100
+}
+
+http://agents.internal {
+  respond "reserved for future agents service" 404
+}
+
+http://ai.internal {
+  respond "reserved for future ai service" 404
+}
+

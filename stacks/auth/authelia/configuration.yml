@@ -1,0 +1,56 @@
+theme: auto
+
+server:
+  address: tcp://0.0.0.0:9091
+
+log:
+  level: info
+
+identity_validation:
+  reset_password:
+    jwt_secret: ${AUTHELIA_JWT_SECRET}
+
+authentication_backend:
+  file:
+    path: /config/users_database.yml
+    password:
+      algorithm: argon2id
+
+access_control:
+  default_policy: deny
+  rules:
+    - domain:
+        - auth.internal
+      policy: bypass
+    - domain:
+        - grafana.internal
+        - prom.internal
+        - prometheus.internal
+        - loki.internal
+      policy: one_factor
+
+session:
+  name: authelia_session
+  secret: ${AUTHELIA_SESSION_SECRET}
+  expiration: 12h
+  inactivity: 30m
+  remember_me: 30d
+  cookies:
+    - domain: ${AUTHELIA_DOMAIN}
+      authelia_url: http://auth.internal
+      default_redirection_url: ${AUTHELIA_DEFAULT_REDIRECTION_URL}
+
+regulation:
+  max_retries: 3
+  find_time: 2m
+  ban_time: 10m
+
+storage:
+  encryption_key: ${AUTHELIA_STORAGE_ENCRYPTION_KEY}
+  local:
+    path: /data/db.sqlite3
+
+notifier:
+  filesystem:
+    filename: /data/notification.txt
+

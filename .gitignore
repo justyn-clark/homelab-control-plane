@@ -1,0 +1,16 @@
+.DS_Store
+.env
+*.env
+*.local
+*.secret
+*.secrets
+ops/secrets/*
+!ops/secrets/README.md
+receipts/*
+!receipts/.gitkeep
+!receipts/launchd/
+receipts/launchd/*
+!receipts/launchd/.gitkeep
+stacks/auth/users_database.yml
+stacks/*/.env
+

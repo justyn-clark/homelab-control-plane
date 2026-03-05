@@ -1,0 +1,24 @@
+services:
+  caddy:
+    image: caddy:2.8.4-alpine
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${TAILNET_BIND_IP}:80:80"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - controlplane
+
+volumes:
+  caddy-data:
+  caddy-config:
+
+networks:
+  controlplane:
+    external: true
+    name: jcn-controlplane
+
