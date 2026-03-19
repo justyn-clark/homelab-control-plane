@@ -4,6 +4,13 @@
 
 This control plane assumes Tailscale is the only reachability path for operators and peer nodes.
 
+Current default access model:
+
+- Tailscale is used to reach the Mac mini
+- Caddy binds to `127.0.0.1` by default
+- Operators then access internal hostnames locally on the host, for example through Tailscale SSH
+- Direct HTTP from another tailnet node requires explicitly binding Caddy to the host tailnet IP
+
 ## Tailscale SSH
 
 - Enable Tailscale SSH on the Mac mini for admin access
@@ -22,7 +29,7 @@ tailscale ip -4
 
 - Place the control plane under a dedicated tag such as `tag:control-plane`
 - Allow SSH only from trusted operator identities or a smaller admin tag
-- Allow HTTP access to the Mac mini tailnet IP only from the same admin scope
+- Allow HTTP access to the Mac mini tailnet IP only if you intentionally enable direct tailnet HTTP
 - Deny broad subnet style access unless there is a documented need
 
 ## Tag Guidance
@@ -38,4 +45,3 @@ Use a subnet router only if a private LAN segment must be bridged into the tailn
 - advertise only the required subnets
 - document the route owner and approval path
 - keep the control plane itself bound to the host tailnet IP, not the routed LAN
-

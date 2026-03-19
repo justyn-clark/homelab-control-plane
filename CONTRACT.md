@@ -25,7 +25,7 @@ This repository contains infrastructure only. It must not include application so
 - Authentication uses Authelia forward-auth
 - Core services are Postgres and Redis
 - Observability uses Prometheus, Grafana, Loki, and Promtail
-- Backups are documented around Restic
+- Backups are handled through Restic and the `ops/backups/restic/backup.sh` workflow
 - Environment defaults are expressed through committed `env.example` files only
 - Secrets are supplied at runtime through ignored files and local operator workflows
 
@@ -33,7 +33,8 @@ This repository contains infrastructure only. It must not include application so
 
 - Docker services communicate across a shared internal bridge network named `jcn-controlplane`
 - Only Caddy publishes host ports
-- Caddy binds to `TAILNET_BIND_IP` or `127.0.0.1`
+- Caddy binds to `TAILNET_BIND_IP`, which defaults to `127.0.0.1`
+- Direct tailnet HTTP is operator-configurable, not enabled by default
 - Internal hostnames are routed by Host header and intended to resolve only within the tailnet or via `curl --resolve`
 
 ## Receipts Contract

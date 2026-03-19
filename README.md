@@ -12,6 +12,19 @@ The repo builds a private-by-default control plane with these fixed defaults:
 - Supervisor: macOS launchd
 - Network boundary: Tailscale only
 
+## What This Is
+
+This repository is an infrastructure-only control plane for a single Mac mini. It is not an application repo. It exists to define and operate a private control-plane baseline for JCN homelab services with receipts, explicit runbooks, and predictable bootstrap flows.
+
+The current implementation is a single-node Compose-based stack with four active layers:
+
+- `core`: Postgres and Redis
+- `observability`: Prometheus, Grafana, Loki, and Promtail
+- `auth`: Authelia
+- `ingress`: Caddy
+
+See [STATUS.md](/Users/justin/Documents/Justyn Clark Network/REPOS/homelab-control-plane/STATUS.md) for the current state, coherency gaps, hardening opportunities, and recommended next steps.
+
 ## Layout
 
 ```text
@@ -35,7 +48,7 @@ The repo builds a private-by-default control plane with these fixed defaults:
 
 - macOS with Docker Desktop installed and running
 - Tailscale installed, logged in, and the host joined to the target tailnet
-- A reachable tailnet IP for this Mac mini
+- Local operator access to the Mac mini over Tailscale SSH or an equivalent Tailscale path
 - Shell access with permission to run `docker` and `launchctl`
 
 ## Bring Up
@@ -88,6 +101,21 @@ PY
 ./ops/bootstrap/macos/bringup.sh
 ```
 
+5. Optional: install launchd persistence after the stack is healthy.
+
+```bash
+DRY_RUN=1 ./ops/bootstrap/macos/install-launchd.sh
+./ops/bootstrap/macos/install-launchd.sh
+```
+
+6. Optional: run a Restic backup once the stack has data.
+
+```bash
+RESTIC_REPOSITORY=/path/to/restic-repo \
+RESTIC_PASSWORD_FILE=/path/to/restic-password \
+./ops/backups/restic/backup.sh
+```
+
 ## Green Verification Sequence
 
 This command sequence should produce green health checks for the included services once the env files are in place:
@@ -123,15 +151,23 @@ PY
 ./ops/bootstrap/macos/bringup.sh
 ```
 
-## Testing From The Tailnet
+## Access Model
 
-The ingress stack binds Caddy to `127.0.0.1` by default. Reachability is intended through Tailscale access to the host, with local testing through `curl --resolve` unless your private DNS already maps the internal names:
+The current default is localhost-bound ingress:
+
+- `stacks/ingress/env.example` sets `TAILNET_BIND_IP=127.0.0.1`
+- Caddy therefore publishes only on localhost by default
+- Operators reach the Mac mini through Tailscale, then access the control plane locally on that host
+
+Default local verification:
 
 ```bash
 curl -I --resolve grafana.internal:80:127.0.0.1 http://grafana.internal/
 curl -I --resolve prom.internal:80:127.0.0.1 http://prom.internal/
 curl -I --resolve auth.internal:80:127.0.0.1 http://auth.internal/
 ```
+
+If you want direct HTTP reachability from other tailnet nodes, set `TAILNET_BIND_IP` in `stacks/ingress/.env` to the host tailnet IP before running `bringup.sh`. That path is supported by the code but is not the default.
 
 Protected routes should return `302` to `auth.internal` before login. The Auth portal health endpoint should return `200`.
 
@@ -174,3 +210,7 @@ The installer writes deterministic runtime logs under `receipts/launchd/` and a 
 - [runbooks/backups-restic.md](/Users/justin/Documents/Justyn Clark Network/REPOS/homelab-control-plane/runbooks/backups-restic.md)
 - [runbooks/recovery.md](/Users/justin/Documents/Justyn Clark Network/REPOS/homelab-control-plane/runbooks/recovery.md)
 - [runbooks/onboarding-new-node.md](/Users/justin/Documents/Justyn Clark Network/REPOS/homelab-control-plane/runbooks/onboarding-new-node.md)
+
+## Current Status
+
+The repo is coherent as a single-node infrastructure baseline, but not yet complete as a fully automated homelab product. The most important remaining gaps are auth bootstrap, restore automation, stronger smoke tests, and a deliberate decision on whether direct tailnet HTTP should stay opt-in or become the default.
