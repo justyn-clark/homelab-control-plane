@@ -63,52 +63,37 @@ cp stacks/auth/env.example stacks/auth/.env
 cp stacks/auth/users_database.example.yml stacks/auth/users_database.yml
 ```
 
-2. Generate non-committed secrets and hashes into `stacks/auth/.env`.
+2. Bootstrap the local Authelia files.
 
 ```bash
-AUTHELIA_SESSION_SECRET="$(openssl rand -hex 32)" \
-AUTHELIA_STORAGE_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
-AUTHELIA_JWT_SECRET="$(openssl rand -hex 32)" \
-AUTHELIA_PASSWORD_HASH="$(docker run --rm authelia/authelia:4 authelia crypto hash generate argon2 --password 'change-me-now' | tail -n 1)" \
-python3 - <<'PY'
-from pathlib import Path
-
-auth_env = Path("stacks/auth/.env")
-auth_lines = auth_env.read_text().splitlines()
-values = {
-    "AUTHELIA_SESSION_SECRET": __import__("os").environ["AUTHELIA_SESSION_SECRET"],
-    "AUTHELIA_STORAGE_ENCRYPTION_KEY": __import__("os").environ["AUTHELIA_STORAGE_ENCRYPTION_KEY"],
-    "AUTHELIA_JWT_SECRET": __import__("os").environ["AUTHELIA_JWT_SECRET"],
-    "AUTHELIA_PASSWORD_HASH": __import__("os").environ["AUTHELIA_PASSWORD_HASH"],
-}
-updated = []
-for line in auth_lines:
-    if "=" in line and not line.startswith("#"):
-        key = line.split("=", 1)[0]
-        updated.append(f"{key}={values.get(key, line.split('=', 1)[1])}")
-    else:
-        updated.append(line)
-auth_env.write_text("\n".join(updated) + "\n")
-PY
+AUTH_PASSWORD='change-me-now' ./ops/bootstrap/macos/bootstrap-auth.sh
 ```
 
-3. Adjust `stacks/auth/users_database.yml` if you want a different username or email.
+Optional overrides:
 
-4. Run the bootstrap flow.
+```bash
+AUTH_USERNAME=justin \
+AUTH_DISPLAY_NAME='Justyn Clark' \
+AUTH_EMAIL='justin@example.internal' \
+AUTH_PASSWORD='change-me-now' \
+./ops/bootstrap/macos/bootstrap-auth.sh
+```
+
+3. Run the bootstrap flow.
 
 ```bash
 ./ops/bootstrap/macos/install.sh
 ./ops/bootstrap/macos/bringup.sh
 ```
 
-5. Optional: install launchd persistence after the stack is healthy.
+4. Optional: install launchd persistence after the stack is healthy.
 
 ```bash
 DRY_RUN=1 ./ops/bootstrap/macos/install-launchd.sh
 ./ops/bootstrap/macos/install-launchd.sh
 ```
 
-6. Optional: run a Restic backup once the stack has data.
+5. Optional: run a Restic backup once the stack has data.
 
 ```bash
 RESTIC_REPOSITORY=/path/to/restic-repo \
@@ -124,29 +109,7 @@ This command sequence should produce green health checks for the included servic
 cp stacks/core/env.example stacks/core/.env
 cp stacks/observability/env.example stacks/observability/.env
 cp stacks/ingress/env.example stacks/ingress/.env
-cp stacks/auth/env.example stacks/auth/.env
-cp stacks/auth/users_database.example.yml stacks/auth/users_database.yml
-AUTHELIA_SESSION_SECRET="$(openssl rand -hex 32)" \
-AUTHELIA_STORAGE_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
-AUTHELIA_JWT_SECRET="$(openssl rand -hex 32)" \
-AUTHELIA_PASSWORD_HASH="$(docker run --rm authelia/authelia:4 authelia crypto hash generate argon2 --password 'change-me-now' | tail -n 1)" \
-python3 - <<'PY'
-from pathlib import Path
-import os
-auth_env = Path("stacks/auth/.env")
-auth_lines = auth_env.read_text().splitlines()
-values = {
-    "AUTHELIA_SESSION_SECRET": os.environ["AUTHELIA_SESSION_SECRET"],
-    "AUTHELIA_STORAGE_ENCRYPTION_KEY": os.environ["AUTHELIA_STORAGE_ENCRYPTION_KEY"],
-    "AUTHELIA_JWT_SECRET": os.environ["AUTHELIA_JWT_SECRET"],
-    "AUTHELIA_PASSWORD_HASH": os.environ["AUTHELIA_PASSWORD_HASH"],
-}
-auth_env.write_text("\n".join(
-    f"{line.split('=', 1)[0]}={values.get(line.split('=', 1)[0], line.split('=', 1)[1])}"
-    if "=" in line and not line.startswith("#") else line
-    for line in auth_lines
-) + "\n")
-PY
+AUTH_PASSWORD='change-me-now' ./ops/bootstrap/macos/bootstrap-auth.sh
 ./ops/bootstrap/macos/install.sh
 ./ops/bootstrap/macos/bringup.sh
 ```

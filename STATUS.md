@@ -26,7 +26,7 @@ The current codebase supports that intent partially:
 
 ## Coherency Gaps
 
-- There is no one-command env generation flow for Authelia secrets and user bootstrap
+- There is now a one-command auth bootstrap path, but it still depends on local operator-provided password input
 - There is no restore automation yet, only recovery documentation
 - There is no alerting, dashboard pack, or SLO layer on top of Prometheus and Grafana
 - There is no automated validation that Authelia forward-auth behavior still returns the expected status codes after image upgrades
@@ -52,8 +52,7 @@ The current codebase supports that intent partially:
 
 ## Recommended Next Steps
 
-1. Add an auth bootstrap script that creates `.env` files and a valid `users_database.yml` from local operator input or generated defaults.
-2. Add a restore script for Restic plus a recovery receipt that proves restore viability.
-3. Add a doctor or smoke-test script that validates Docker, Tailscale, launchd, and HTTP auth behavior before and after bringup.
-4. Decide whether direct tailnet HTTP should remain opt-in or become the default, then align `TAILNET_BIND_IP`, runbooks, and validation around that choice.
-
+1. Add a restore script for Restic plus a recovery receipt that proves restore viability.
+2. Add a doctor or smoke-test script that validates Docker, Tailscale, launchd, and HTTP auth behavior before and after bringup.
+3. Decide whether direct tailnet HTTP should remain opt-in or become the default, then align `TAILNET_BIND_IP`, runbooks, and validation around that choice.
+4. Add a minimal env validation step that checks generated local auth files before `bringup.sh`.
