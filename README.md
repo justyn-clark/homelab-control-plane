@@ -1,29 +1,29 @@
 # homelab-control-plane
 
-Reproducible Mac mini control plane for the JCN homelab.
+Single-node Mac mini control host for the JCN homelab.
 
-The repo builds a private-by-default control plane with these fixed defaults:
+The repo defines a private-by-default Docker Compose baseline with these fixed defaults:
 
 - Ingress: Caddy
 - Auth: Authelia
 - Core: Postgres and Redis
 - Observability: Prometheus, Grafana, Loki, and Promtail
-- Backups: Restic runbook and retention guidance
-- Supervisor: macOS launchd
+- Backups: Restic script and runbook
+- Optional bring-up trigger: macOS user LaunchAgent
 - Network boundary: Tailscale only
 
 ## What This Is
 
-This repository is an infrastructure-only control plane for a single Mac mini. It is not an application repo. It exists to define and operate a private control-plane baseline for JCN homelab services with receipts, explicit runbooks, and predictable bootstrap flows.
+This repository is an infrastructure-only control host for one Mac mini. It is not an application repo, not a cluster manager, and not a Kubernetes platform. It exists to define and operate a private internal-services baseline with receipts, explicit runbooks, and predictable bootstrap flows.
 
-The current implementation is a single-node Compose-based stack with four active layers:
+The current implementation is a single-node Compose stack with four active layers:
 
 - `core`: Postgres and Redis
 - `observability`: Prometheus, Grafana, Loki, and Promtail
 - `auth`: Authelia
 - `ingress`: Caddy
 
-See [STATUS.md](/Users/justin/Documents/Justyn Clark Network/REPOS/homelab-control-plane/STATUS.md) for the current state, coherency gaps, hardening opportunities, and recommended next steps.
+See [STATUS.md](STATUS.md) for the current state and remaining limitations.
 
 ## Layout
 
@@ -53,7 +53,7 @@ See [STATUS.md](/Users/justin/Documents/Justyn Clark Network/REPOS/homelab-contr
 
 ## Bring Up
 
-1. Prepare local env files from the committed templates.
+1. Prepare local files from the committed templates.
 
 ```bash
 cp stacks/core/env.example stacks/core/.env
@@ -86,7 +86,7 @@ AUTH_PASSWORD='change-me-now' \
 ./ops/bootstrap/macos/bringup.sh
 ```
 
-4. Optional: install launchd persistence after the stack is healthy.
+4. Optional: install the user LaunchAgent after the stack is healthy.
 
 ```bash
 DRY_RUN=1 ./ops/bootstrap/macos/install-launchd.sh
@@ -101,9 +101,9 @@ RESTIC_PASSWORD_FILE=/path/to/restic-password \
 ./ops/backups/restic/backup.sh
 ```
 
-## Green Verification Sequence
+## Smoke Verification Sequence
 
-This command sequence should produce green health checks for the included services once the env files are in place:
+This command sequence should produce green container and HTTP smoke checks once the local files are in place:
 
 ```bash
 cp stacks/core/env.example stacks/core/.env
@@ -114,25 +114,31 @@ AUTH_PASSWORD='change-me-now' ./ops/bootstrap/macos/bootstrap-auth.sh
 ./ops/bootstrap/macos/bringup.sh
 ```
 
+`bringup.sh` now checks the expected Compose service set for each stack and fails if an expected container is missing or lands in `created`, `dead`, `exited`, `restarting`, or `unhealthy` state.
+
 ## Access Model
 
-The current default is localhost-bound ingress:
+The default ingress path is localhost-bound:
 
 - `stacks/ingress/env.example` sets `TAILNET_BIND_IP=127.0.0.1`
 - Caddy therefore publishes only on localhost by default
-- Operators reach the Mac mini through Tailscale, then access the control plane locally on that host
+- Operators reach the Mac mini through Tailscale, then access the control host locally on that machine
 
-Default local verification:
+Default local smoke checks:
 
 ```bash
 curl -I --resolve grafana.internal:80:127.0.0.1 http://grafana.internal/
 curl -I --resolve prom.internal:80:127.0.0.1 http://prom.internal/
-curl -I --resolve auth.internal:80:127.0.0.1 http://auth.internal/
+curl -I --resolve auth.internal:80:127.0.0.1 http://auth.internal/api/health
 ```
 
 If you want direct HTTP reachability from other tailnet nodes, set `TAILNET_BIND_IP` in `stacks/ingress/.env` to the host tailnet IP before running `bringup.sh`. That path is supported by the code but is not the default.
 
-Protected routes should return `302` to `auth.internal` before login. The Auth portal health endpoint should return `200`.
+The scripted HTTP checks are smoke checks only:
+
+- `auth.internal/api/health` must return `200`
+- Protected routes must return `302` with a redirect toward `auth.internal`
+- These checks do not prove an interactive Authelia login flow or full browser usability
 
 ## Sample Receipt Tree
 
@@ -149,6 +155,10 @@ receipts/
    |- bringup.log
    |- endpoints.txt
    |- healthchecks.txt
+   |- http-auth-portal.headers.txt
+   |- http-grafana-gate.headers.txt
+   |- http-loki-gate.headers.txt
+   |- http-prometheus-gate.headers.txt
    |- stack-auth.ps.txt
    |- stack-core.ps.txt
    |- stack-ingress.ps.txt
@@ -156,24 +166,33 @@ receipts/
    `- versions.txt
 ```
 
-## Boot Persistence
+## LaunchAgent Behavior
 
-The launchd asset lives at [ops/bootstrap/macos/launchd/com.jcn.controlplane.plist](/Users/justin/Documents/Justyn Clark Network/REPOS/homelab-control-plane/ops/bootstrap/macos/launchd/com.jcn.controlplane.plist). Use [ops/bootstrap/macos/install-launchd.sh](/Users/justin/Documents/Justyn Clark Network/REPOS/homelab-control-plane/ops/bootstrap/macos/install-launchd.sh) to render the plist with the current repo path, lint it, and install it as a user LaunchAgent with receipt output.
+The committed launchd asset at [`ops/bootstrap/macos/launchd/com.jcn.controlplane.plist`](ops/bootstrap/macos/launchd/com.jcn.controlplane.plist) is a portable template with repo-path placeholders. [`ops/bootstrap/macos/install-launchd.sh`](ops/bootstrap/macos/install-launchd.sh) renders that template with the current repo path, lints the rendered plist, and installs it to `~/Library/LaunchAgents/com.jcn.controlplane.plist`.
 
 ```bash
 DRY_RUN=1 ./ops/bootstrap/macos/install-launchd.sh
 ./ops/bootstrap/macos/install-launchd.sh
 ```
 
+This LaunchAgent is user-session scoped:
+
+- It runs `bringup.sh` once when the agent is loaded or when that user logs in
+- It does not use `KeepAlive` or `StartInterval`
+- It is not a daemon supervisor for the Compose stack
+- It is not a machine-boot guarantee for a headless host because `~/Library/LaunchAgents` requires the user session
+
+Docker Compose restart policies remain responsible for keeping already-started containers running after bring-up.
+
 The installer writes deterministic runtime logs under `receipts/launchd/` and a timestamped install receipt under `receipts/<timestamp>/`.
 
 ## Runbooks
 
-- [runbooks/tailscale.md](/Users/justin/Documents/Justyn Clark Network/REPOS/homelab-control-plane/runbooks/tailscale.md)
-- [runbooks/backups-restic.md](/Users/justin/Documents/Justyn Clark Network/REPOS/homelab-control-plane/runbooks/backups-restic.md)
-- [runbooks/recovery.md](/Users/justin/Documents/Justyn Clark Network/REPOS/homelab-control-plane/runbooks/recovery.md)
-- [runbooks/onboarding-new-node.md](/Users/justin/Documents/Justyn Clark Network/REPOS/homelab-control-plane/runbooks/onboarding-new-node.md)
+- [runbooks/tailscale.md](runbooks/tailscale.md)
+- [runbooks/backups-restic.md](runbooks/backups-restic.md)
+- [runbooks/recovery.md](runbooks/recovery.md)
+- [runbooks/onboarding-new-node.md](runbooks/onboarding-new-node.md)
 
 ## Current Status
 
-The repo is coherent as a single-node infrastructure baseline, but not yet complete as a fully automated homelab product. The most important remaining gaps are auth bootstrap, restore automation, stronger smoke tests, and a deliberate decision on whether direct tailnet HTTP should stay opt-in or become the default.
+The repo is operationally coherent as a single-node private services baseline. The main limitations that still remain are user-session-scoped launchd behavior, manual restore work, and the lack of an interactive browser-auth validation path in the scripted checks.

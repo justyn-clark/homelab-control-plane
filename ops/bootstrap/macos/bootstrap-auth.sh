@@ -14,6 +14,7 @@ AUTH_ENV_EXAMPLE="${REPO_ROOT}/stacks/auth/env.example"
 AUTH_ENV_FILE="${REPO_ROOT}/stacks/auth/.env"
 USERS_EXAMPLE_FILE="${REPO_ROOT}/stacks/auth/users_database.example.yml"
 USERS_FILE="${REPO_ROOT}/stacks/auth/users_database.yml"
+AUTH_COMPOSE_FILE="${REPO_ROOT}/stacks/auth/compose.yml"
 
 FORCE_REGENERATE="${FORCE_REGENERATE:-0}"
 AUTH_USERNAME="${AUTH_USERNAME:-admin}"
@@ -68,6 +69,18 @@ random_hex() {
   openssl rand -hex 32
 }
 
+authelia_hash_image() {
+  local image
+  image="$(awk '/image:[[:space:]]+authelia\\/authelia:/ {print $2; exit}' "${AUTH_COMPOSE_FILE}")"
+
+  if [[ -z "${image}" ]]; then
+    echo "unable to determine Authelia image from ${AUTH_COMPOSE_FILE}" >&2
+    exit 1
+  fi
+
+  printf '%s' "${image}"
+}
+
 generate_password_hash() {
   if [[ -n "${AUTHELIA_PASSWORD_HASH_OVERRIDE}" ]]; then
     printf '%s' "${AUTHELIA_PASSWORD_HASH_OVERRIDE}"
@@ -79,7 +92,7 @@ generate_password_hash() {
     exit 1
   fi
 
-  docker run --rm authelia/authelia:4 \
+  docker run --rm "$(authelia_hash_image)" \
     authelia crypto hash generate argon2 --password "${AUTH_PASSWORD}" | tail -n 1 | sed 's/^Digest: //'
 }
 
@@ -187,6 +200,7 @@ require_cmd docker
 require_cmd awk
 require_file "${AUTH_ENV_EXAMPLE}"
 require_file "${USERS_EXAMPLE_FILE}"
+require_file "${AUTH_COMPOSE_FILE}"
 
 set_value_and_status \
   "$(read_env_value "${AUTH_ENV_FILE}" "AUTHELIA_DOMAIN")" \

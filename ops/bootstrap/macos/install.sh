@@ -43,7 +43,6 @@ echo "receipt_dir=${RECEIPT_DIR}"
 
 brew_install_if_missing docker install --cask docker || true
 brew_install_if_missing tailscale install --cask tailscale || true
-brew_install_if_missing jq install jq || true
 brew_install_if_missing curl install curl || true
 brew_install_if_missing restic install restic || true
 

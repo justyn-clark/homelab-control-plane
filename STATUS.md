@@ -2,57 +2,34 @@
 
 ## Summary
 
-This repository is an infrastructure-only control plane scaffold for a single Mac mini in the JCN homelab.
+This repository is a single-node private control host for one Mac mini in the JCN homelab.
 
 It currently provides:
 
 - Docker Compose stacks for core data services, observability, auth, and ingress
-- macOS bootstrap scripts for install, bringup, and launchd installation
+- macOS bootstrap scripts for install, auth bootstrap, bring-up, and optional LaunchAgent installation
 - A Restic backup script with receipt output
-- Runbooks for Tailscale, onboarding, backup, and recovery
+- Runbooks for Tailscale, backup, recovery, and operator access from another tailnet client
 - A receipts-first operating model for scripted actions
 
-## Product Intent Versus Current Reality
+## Current Shape
 
-The product intent is a private-by-default control plane that is reached only through Tailscale.
-
-The current codebase supports that intent partially:
-
-- The stack composition and supervisor model are in place
-- Ingress is private by default because Caddy binds to `127.0.0.1` unless the operator chooses a different `TAILNET_BIND_IP`
+- Ingress is private by default because Caddy binds to `127.0.0.1` unless the operator deliberately sets a tailnet IP in `TAILNET_BIND_IP`
 - Authelia gates Grafana, Prometheus, and Loki through Caddy
-- Direct tailnet HTTP access is not enabled by default because `TAILNET_BIND_IP` defaults to `127.0.0.1`
-- Tailnet access today is best understood as operator access to the host, then local access to the control plane, unless the operator explicitly binds Caddy to a tailnet IP
+- `bringup.sh` validates expected Compose services from the compose metadata and fails if a service container is missing, exited, dead, restarting, or unhealthy
+- HTTP verification is limited to smoke checks: `auth.internal/api/health` must return `200`, and protected routes must redirect toward `auth.internal`
+- The backup workflow captures named volumes, a Postgres logical dump when available, `stacks/`, `runbooks/`, `ops/`, selected top-level docs, and the current backup receipt bundle
 
-## Coherency Gaps
+## Current Limits
 
-- There is now a one-command auth bootstrap path, but it still depends on local operator-provided password input
-- There is no restore automation yet, only recovery documentation
-- There is no alerting, dashboard pack, or SLO layer on top of Prometheus and Grafana
-- There is no automated validation that Authelia forward-auth behavior still returns the expected status codes after image upgrades
-- There is no DNS automation for the `*.internal` hostnames
-- The stack is still optimized for a single operator-managed node, not multiple nodes or shared ownership
-
-## Hardening Opportunities
-
-- Add a deterministic env initialization script for auth secrets and operator bootstrap
-- Add a restore script that reverses the Restic backup workflow with receipts
-- Pin and periodically review image digests instead of tags alone
-- Add receipt-driven smoke tests that assert protected routes, redirects, and container health in one place
-- Add a minimal Prometheus alert rules file and provision Grafana dashboards
-- Add explicit Docker volume restore procedures and verification checks
-
-## Future Scale Paths
-
-- Split shared config generation from node-local state so a second control-plane node can reuse the same patterns
-- Move from manual hostname resolution to a deliberate private DNS pattern
-- Introduce per-service contracts for new internal tools rather than growing the repo into a mixed app-and-infra codebase
-- Add node role overlays under `stacks/optional/` instead of changing the v1 base path
-- Standardize a small set of operational commands so AI agents and human operators use the same flow
+- Launchd integration is installed under `~/Library/LaunchAgents`, so it is user-session scoped rather than a machine-boot guarantee
+- The LaunchAgent runs `bringup.sh` once at load or login; it is not the long-running supervisor for the Docker Compose stack
+- The scripted checks do not verify a full browser login through Authelia
+- Restore remains manual and runbook-driven
+- The repo is intentionally optimized for a single operator-managed host, not a cluster or multi-node platform
 
 ## Recommended Next Steps
 
-1. Add a restore script for Restic plus a recovery receipt that proves restore viability.
-2. Add a doctor or smoke-test script that validates Docker, Tailscale, launchd, and HTTP auth behavior before and after bringup.
-3. Decide whether direct tailnet HTTP should remain opt-in or become the default, then align `TAILNET_BIND_IP`, runbooks, and validation around that choice.
-4. Add a minimal env validation step that checks generated local auth files before `bringup.sh`.
+1. Perform and capture a full restore rehearsal against this node so backup and recovery claims are proven end to end.
+2. Add a small preflight validator for required local files before `bringup.sh` is used operationally.
+3. Keep manual browser validation in the operating cadence after auth, ingress, or image changes.

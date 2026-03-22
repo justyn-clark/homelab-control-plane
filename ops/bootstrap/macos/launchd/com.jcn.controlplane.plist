@@ -7,7 +7,7 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>/Users/justin/Documents/Justyn Clark Network/REPOS/homelab-control-plane/ops/bootstrap/macos/bringup.sh</string>
+    <string>__BRINGUP_SCRIPT__</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
@@ -16,16 +16,11 @@
   </dict>
   <key>RunAtLoad</key>
   <true/>
-  <key>KeepAlive</key>
-  <true/>
-  <key>StartInterval</key>
-  <integer>300</integer>
   <key>StandardOutPath</key>
-  <string>/Users/justin/Documents/Justyn Clark Network/REPOS/homelab-control-plane/receipts/launchd/bringup.stdout.log</string>
+  <string>__STDOUT_LOG__</string>
   <key>StandardErrorPath</key>
-  <string>/Users/justin/Documents/Justyn Clark Network/REPOS/homelab-control-plane/receipts/launchd/bringup.stderr.log</string>
+  <string>__STDERR_LOG__</string>
   <key>WorkingDirectory</key>
-  <string>/Users/justin/Documents/Justyn Clark Network/REPOS/homelab-control-plane</string>
+  <string>__WORKING_DIRECTORY__</string>
 </dict>
 </plist>
-

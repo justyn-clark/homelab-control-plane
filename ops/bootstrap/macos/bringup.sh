@@ -60,29 +60,66 @@ compose_ps() {
   local stack_name="$1"
   local compose_file="$2"
   local project_name="$3"
-  docker compose -p "${project_name}" -f "${compose_file}" ps > "${RECEIPT_DIR}/stack-${stack_name}.ps.txt"
+  docker compose -p "${project_name}" -f "${compose_file}" ps -a > "${RECEIPT_DIR}/stack-${stack_name}.ps.txt"
 }
 
 inspect_health() {
-  local project_name="$1"
+  local stack_name="$1"
+  local compose_file="$2"
+  local project_name="$3"
+  local -a containers=()
   local tries=30
   while [[ "${tries}" -gt 0 ]]; do
     local failed=0
-    while read -r container; do
-      [[ -z "${container}" ]] && continue
-      local status
-      status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${container}")"
-      echo "${container} ${status}" >> "${HEALTH_FILE}"
-      if [[ "${status}" != "healthy" && "${status}" != "running" ]]; then
+    compose_ps "${stack_name}" "${compose_file}" "${project_name}"
+
+    while read -r service; do
+      [[ -z "${service}" ]] && continue
+
+      local service_failed=0
+      mapfile -t containers < <(docker compose -p "${project_name}" -f "${compose_file}" ps -a -q "${service}")
+
+      if [[ "${#containers[@]}" -eq 0 ]]; then
+        echo "${project_name}/${service} state=missing health=missing" >> "${HEALTH_FILE}"
+        failed=1
+        continue
+      fi
+
+      for container_id in "${containers[@]}"; do
+        local inspect_output
+        local container_name
+        local container_state
+        local container_health
+
+        inspect_output="$(docker inspect --format '{{.Name}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${container_id}")"
+        IFS='|' read -r container_name container_state container_health <<< "${inspect_output}"
+        container_name="${container_name#/}"
+
+        echo "${project_name}/${service} container=${container_name} state=${container_state} health=${container_health}" >> "${HEALTH_FILE}"
+
+        if [[ "${container_state}" != "running" ]]; then
+          service_failed=1
+          continue
+        fi
+
+        if [[ "${container_health}" != "healthy" && "${container_health}" != "none" ]]; then
+          service_failed=1
+        fi
+      done
+
+      if [[ "${service_failed}" -ne 0 ]]; then
         failed=1
       fi
-    done < <(docker ps --filter "label=com.docker.compose.project=${project_name}" --format '{{.Names}}')
+    done < <(docker compose -p "${project_name}" -f "${compose_file}" config --services)
+
     if [[ "${failed}" -eq 0 ]]; then
       return 0
     fi
     tries=$((tries - 1))
     sleep 5
   done
+
+  compose_ps "${stack_name}" "${compose_file}" "${project_name}"
   echo "health check timeout for project ${project_name}"
   exit 1
 }
@@ -93,11 +130,19 @@ http_check() {
   local path="$3"
   local expected="$4"
   local bind_ip="$5"
+  local expected_location_fragment="${6:-}"
+  local headers_file="${RECEIPT_DIR}/http-${name}.headers.txt"
   local code
-  code="$(curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 15 --resolve "${host}:80:${bind_ip}" "http://${host}${path}")"
-  echo "${name} ${host}${path} expected=${expected} actual=${code}" >> "${HEALTH_FILE}"
+  local location
+  code="$(curl -sS -D "${headers_file}" -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 15 --resolve "${host}:80:${bind_ip}" "http://${host}${path}")"
+  location="$(awk 'BEGIN { IGNORECASE = 1 } /^location:/ {print $2}' "${headers_file}" | tr -d '\r' | tail -n 1)"
+  echo "${name} ${host}${path} expected=${expected} actual=${code} location=${location:-none}" >> "${HEALTH_FILE}"
   if [[ "${code}" != "${expected}" ]]; then
     echo "http health check failed for ${host}${path}: expected ${expected}, got ${code}"
+    exit 1
+  fi
+  if [[ -n "${expected_location_fragment}" && "${location}" != *"${expected_location_fragment}"* ]]; then
+    echo "http health check failed for ${host}${path}: expected redirect containing ${expected_location_fragment}, got ${location:-none}"
     exit 1
   fi
 }
@@ -120,7 +165,7 @@ for entry in "${STACKS[@]}"; do
   echo "starting ${stack_name}"
   docker compose -p "${project_name}" -f "${compose_file}" up -d
   compose_ps "${stack_name}" "${compose_file}" "${project_name}"
-  inspect_health "${project_name}"
+  inspect_health "${stack_name}" "${compose_file}" "${project_name}"
 done
 
 TAILNET_BIND_IP="$(grep '^TAILNET_BIND_IP=' "${REPO_ROOT}/stacks/ingress/.env" | cut -d= -f2-)"
@@ -130,9 +175,9 @@ if [[ -z "${TAILNET_BIND_IP}" ]]; then
 fi
 
 http_check "auth-portal" "auth.internal" "/api/health" "200" "${TAILNET_BIND_IP}"
-http_check "grafana-gate" "grafana.internal" "/" "302" "${TAILNET_BIND_IP}"
-http_check "prometheus-gate" "prom.internal" "/" "302" "${TAILNET_BIND_IP}"
-http_check "loki-gate" "loki.internal" "/ready" "302" "${TAILNET_BIND_IP}"
+http_check "grafana-gate" "grafana.internal" "/" "302" "${TAILNET_BIND_IP}" "auth.internal"
+http_check "prometheus-gate" "prom.internal" "/" "302" "${TAILNET_BIND_IP}" "auth.internal"
+http_check "loki-gate" "loki.internal" "/ready" "302" "${TAILNET_BIND_IP}" "auth.internal"
 
 cat > "${ENDPOINTS_FILE}" <<EOF
 bind_ip=${TAILNET_BIND_IP}
@@ -145,7 +190,7 @@ internal_hostnames:
 - loki.internal
 
 test_commands:
-curl -I --resolve auth.internal:80:${TAILNET_BIND_IP} http://auth.internal/
+curl -I --resolve auth.internal:80:${TAILNET_BIND_IP} http://auth.internal/api/health
 curl -I --resolve grafana.internal:80:${TAILNET_BIND_IP} http://grafana.internal/
 curl -I --resolve prom.internal:80:${TAILNET_BIND_IP} http://prom.internal/
 curl -I --resolve loki.internal:80:${TAILNET_BIND_IP} http://loki.internal/

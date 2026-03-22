@@ -7,6 +7,7 @@ RECEIPT_TS="$(date -u +"%Y%m%dT%H%M%SZ")"
 RECEIPT_DIR="${REPO_ROOT}/receipts/${RECEIPT_TS}"
 LOG_FILE="${RECEIPT_DIR}/launchd-install.log"
 PLIST_LABEL="com.jcn.controlplane"
+PLIST_TEMPLATE="${REPO_ROOT}/ops/bootstrap/macos/launchd/${PLIST_LABEL}.plist"
 TARGET_PLIST="${HOME}/Library/LaunchAgents/${PLIST_LABEL}.plist"
 RENDERED_PLIST="${RECEIPT_DIR}/${PLIST_LABEL}.plist"
 LAUNCHD_STATUS_FILE="${RECEIPT_DIR}/launchd-status.txt"
@@ -22,6 +23,14 @@ require_cmd() {
   }
 }
 
+require_file() {
+  local path="$1"
+  if [[ ! -f "${path}" ]]; then
+    echo "missing required file: ${path}"
+    exit 1
+  fi
+}
+
 plist_escape() {
   local value="$1"
   value="${value//&/&amp;}"
@@ -30,49 +39,37 @@ plist_escape() {
   printf '%s' "${value}"
 }
 
+awk_escape_replacement() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//&/\\&}"
+  printf '%s' "${value}"
+}
+
 write_plist() {
-  local repo_root_escaped
-  local stdout_escaped
-  local stderr_escaped
-  local bringup_escaped
+  local repo_root_replacement
+  local stdout_replacement
+  local stderr_replacement
+  local bringup_replacement
 
-  repo_root_escaped="$(plist_escape "${REPO_ROOT}")"
-  stdout_escaped="$(plist_escape "${REPO_ROOT}/receipts/launchd/bringup.stdout.log")"
-  stderr_escaped="$(plist_escape "${REPO_ROOT}/receipts/launchd/bringup.stderr.log")"
-  bringup_escaped="$(plist_escape "${REPO_ROOT}/ops/bootstrap/macos/bringup.sh")"
+  repo_root_replacement="$(awk_escape_replacement "$(plist_escape "${REPO_ROOT}")")"
+  stdout_replacement="$(awk_escape_replacement "$(plist_escape "${REPO_ROOT}/receipts/launchd/bringup.stdout.log")")"
+  stderr_replacement="$(awk_escape_replacement "$(plist_escape "${REPO_ROOT}/receipts/launchd/bringup.stderr.log")")"
+  bringup_replacement="$(awk_escape_replacement "$(plist_escape "${REPO_ROOT}/ops/bootstrap/macos/bringup.sh")")"
 
-  cat > "${RENDERED_PLIST}" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>${PLIST_LABEL}</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/bin/bash</string>
-    <string>${bringup_escaped}</string>
-  </array>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>PATH</key>
-    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-  </dict>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
-  <key>StartInterval</key>
-  <integer>300</integer>
-  <key>StandardOutPath</key>
-  <string>${stdout_escaped}</string>
-  <key>StandardErrorPath</key>
-  <string>${stderr_escaped}</string>
-  <key>WorkingDirectory</key>
-  <string>${repo_root_escaped}</string>
-</dict>
-</plist>
-EOF
+  awk \
+    -v bringup_script="${bringup_replacement}" \
+    -v stdout_log="${stdout_replacement}" \
+    -v stderr_log="${stderr_replacement}" \
+    -v working_directory="${repo_root_replacement}" \
+    '{
+      gsub(/__BRINGUP_SCRIPT__/, bringup_script)
+      gsub(/__STDOUT_LOG__/, stdout_log)
+      gsub(/__STDERR_LOG__/, stderr_log)
+      gsub(/__WORKING_DIRECTORY__/, working_directory)
+      print
+    }' \
+    "${PLIST_TEMPLATE}" > "${RENDERED_PLIST}"
 }
 
 capture_status() {
@@ -95,6 +92,8 @@ require_cmd plutil
 require_cmd launchctl
 require_cmd install
 require_cmd id
+require_cmd awk
+require_file "${PLIST_TEMPLATE}"
 
 write_plist
 plutil -lint "${RENDERED_PLIST}"
@@ -118,4 +117,3 @@ launchctl kickstart -k "gui/$(id -u)/${PLIST_LABEL}"
 capture_status
 
 echo "launchd install complete"
-

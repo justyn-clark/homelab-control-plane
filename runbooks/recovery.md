@@ -4,8 +4,8 @@
 
 1. Confirm Docker Desktop is running and reachable with `docker info`
 2. Confirm Tailscale is online with `tailscale status`
-3. Check launchd logs under `receipts/launchd/`
-4. Run `./ops/bootstrap/macos/bringup.sh`
+3. If the optional LaunchAgent is installed, remember it is user-session scoped under `~/Library/LaunchAgents`; confirm the operator account is logged in and check `receipts/launchd/`
+4. Run `./ops/bootstrap/macos/bringup.sh` manually if the stack is not already healthy
 5. Review the latest receipt bundle for failures
 
 ## Disk Full
@@ -24,9 +24,8 @@
 
 ## Restore Procedure
 
-1. Restore stack configs and ignored env files from secure local storage
-2. Restore Postgres from `pg_restore` or `psql` against a recreated container
+1. Restore the backed-up `stacks/` tree if local `.env` files or `users_database.yml` were lost; this repository's backup script includes them when present
+2. Restore Postgres from `postgres.dump.sql`, `pg_restore`, or `psql` against a recreated container as appropriate
 3. Restore named volume data for Grafana, Loki, Redis, and Authelia if required
 4. Run `./ops/bootstrap/macos/bringup.sh`
-5. Validate ingress and auth flows from another tailnet node
-
+5. Validate the receipt bundle, then perform manual browser validation if auth-gated access must be proven interactively
