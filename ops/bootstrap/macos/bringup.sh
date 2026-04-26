@@ -69,6 +69,7 @@ inspect_health() {
   local project_name="$3"
   local -a containers=()
   local tries=30
+
   while [[ "${tries}" -gt 0 ]]; do
     local failed=0
     compose_ps "${stack_name}" "${compose_file}" "${project_name}"
@@ -77,7 +78,11 @@ inspect_health() {
       [[ -z "${service}" ]] && continue
 
       local service_failed=0
-      mapfile -t containers < <(docker compose -p "${project_name}" -f "${compose_file}" ps -a -q "${service}")
+      containers=()
+      while read -r container_id; do
+        [[ -z "${container_id}" ]] && continue
+        containers+=("${container_id}")
+      done < <(docker compose -p "${project_name}" -f "${compose_file}" ps -a -q "${service}")
 
       if [[ "${#containers[@]}" -eq 0 ]]; then
         echo "${project_name}/${service} state=missing health=missing" >> "${HEALTH_FILE}"
@@ -115,6 +120,7 @@ inspect_health() {
     if [[ "${failed}" -eq 0 ]]; then
       return 0
     fi
+
     tries=$((tries - 1))
     sleep 5
   done
@@ -134,13 +140,16 @@ http_check() {
   local headers_file="${RECEIPT_DIR}/http-${name}.headers.txt"
   local code
   local location
-  code="$(curl -sS -D "${headers_file}" -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 15 --resolve "${host}:80:${bind_ip}" "http://${host}${path}")"
+
+  code="$(curl -k -sS -D "${headers_file}" -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 15 --resolve "${host}:8443:${bind_ip}" "https://${host}:8443${path}")"
   location="$(awk 'BEGIN { IGNORECASE = 1 } /^location:/ {print $2}' "${headers_file}" | tr -d '\r' | tail -n 1)"
   echo "${name} ${host}${path} expected=${expected} actual=${code} location=${location:-none}" >> "${HEALTH_FILE}"
+
   if [[ "${code}" != "${expected}" ]]; then
     echo "http health check failed for ${host}${path}: expected ${expected}, got ${code}"
     exit 1
   fi
+
   if [[ -n "${expected_location_fragment}" && "${location}" != *"${expected_location_fragment}"* ]]; then
     echo "http health check failed for ${host}${path}: expected redirect containing ${expected_location_fragment}, got ${location:-none}"
     exit 1
@@ -174,26 +183,26 @@ if [[ -z "${TAILNET_BIND_IP}" ]]; then
   exit 1
 fi
 
-http_check "auth-portal" "auth.internal" "/api/health" "200" "${TAILNET_BIND_IP}"
-http_check "grafana-gate" "grafana.internal" "/" "302" "${TAILNET_BIND_IP}" "auth.internal"
-http_check "prometheus-gate" "prom.internal" "/" "302" "${TAILNET_BIND_IP}" "auth.internal"
-http_check "loki-gate" "loki.internal" "/ready" "302" "${TAILNET_BIND_IP}" "auth.internal"
+http_check "auth-portal" "auth.internal.home.arpa" "/api/health" "200" "${TAILNET_BIND_IP}"
+http_check "grafana-gate" "grafana.internal.home.arpa" "/" "302" "${TAILNET_BIND_IP}" "auth.internal.home.arpa"
+http_check "prometheus-gate" "prom.internal.home.arpa" "/" "302" "${TAILNET_BIND_IP}" "auth.internal.home.arpa"
+http_check "loki-gate" "loki.internal.home.arpa" "/ready" "302" "${TAILNET_BIND_IP}" "auth.internal.home.arpa"
 
 cat > "${ENDPOINTS_FILE}" <<EOF
 bind_ip=${TAILNET_BIND_IP}
 
 internal_hostnames:
-- auth.internal
-- grafana.internal
-- prom.internal
-- prometheus.internal
-- loki.internal
+- auth.internal.home.arpa
+- grafana.internal.home.arpa
+- prom.internal.home.arpa
+- prometheus.internal.home.arpa
+- loki.internal.home.arpa
 
 test_commands:
-curl -I --resolve auth.internal:80:${TAILNET_BIND_IP} http://auth.internal/api/health
-curl -I --resolve grafana.internal:80:${TAILNET_BIND_IP} http://grafana.internal/
-curl -I --resolve prom.internal:80:${TAILNET_BIND_IP} http://prom.internal/
-curl -I --resolve loki.internal:80:${TAILNET_BIND_IP} http://loki.internal/
+curl -k -I --resolve auth.internal.home.arpa:8443:${TAILNET_BIND_IP} https://auth.internal.home.arpa:8443/api/health
+curl -k -I --resolve grafana.internal.home.arpa:8443:${TAILNET_BIND_IP} https://grafana.internal.home.arpa:8443/
+curl -k -I --resolve prom.internal.home.arpa:8443:${TAILNET_BIND_IP} https://prom.internal.home.arpa:8443/
+curl -k -I --resolve loki.internal.home.arpa:8443:${TAILNET_BIND_IP} https://loki.internal.home.arpa:8443/ready
 EOF
 
 echo "bringup complete"

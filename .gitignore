@@ -13,4 +13,4 @@ receipts/launchd/*
 !receipts/launchd/.gitkeep
 stacks/auth/users_database.yml
 stacks/*/.env
-
+stacks/auth/authelia/configuration.local.yml

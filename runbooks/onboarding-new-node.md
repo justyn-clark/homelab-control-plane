@@ -16,14 +16,14 @@ Example:
 
 ```bash
 tailscale ssh <mac-mini-name>
-curl -I --resolve auth.internal:80:127.0.0.1 http://auth.internal/api/health
-curl -I --resolve grafana.internal:80:127.0.0.1 http://grafana.internal/
-curl -I --resolve prom.internal:80:127.0.0.1 http://prom.internal/
+curl -k -I --resolve auth.internal.home.arpa:8443:127.0.0.1 https://auth.internal.home.arpa:8443/api/health
+curl -k -I --resolve grafana.internal.home.arpa:8443:127.0.0.1 https://grafana.internal.home.arpa:8443/
+curl -k -I --resolve prom.internal.home.arpa:8443:127.0.0.1 https://prom.internal.home.arpa:8443/
 ```
 
 ## Expected Results
 
-- `auth.internal/api/health` responds with `200`
-- Protected service routes return `302` with a redirect toward `auth.internal`
+- `auth.internal.home.arpa/api/health` responds with `200`
+- Protected service routes return `302` with a redirect toward `auth.internal.home.arpa`
 - Access succeeds only from approved tailnet identities
 - This is an HTTP smoke check only, not proof of a complete browser login flow

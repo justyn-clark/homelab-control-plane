@@ -5,7 +5,7 @@ services:
     env_file:
       - .env
     ports:
-      - "${TAILNET_BIND_IP}:80:80"
+      - "${TAILNET_BIND_IP}:8443:443"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

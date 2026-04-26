@@ -1,5 +1,10 @@
 # homelab-control-plane
 
+[![macOS](https://img.shields.io/badge/macOS-launchd-black)](ops/bootstrap/macos/)
+[![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED)](stacks/)
+[![Caddy + Authelia](https://img.shields.io/badge/Ingress-Caddy%20%2B%20Authelia-00C389)](stacks/ingress/compose.yml)
+[![Network Boundary](https://img.shields.io/badge/Network-Tailscale-242424)](runbooks/tailscale.md)
+
 Single-node Mac mini control host for the JCN homelab.
 
 The repo defines a private-by-default Docker Compose baseline with these fixed defaults:
@@ -31,7 +36,9 @@ See [STATUS.md](STATUS.md) for the current state and remaining limitations.
 .
 |- CONTRACT.md
 |- README.md
+|- STATUS.md
 |- ops/
+|  |- backups/
 |  |- bootstrap/macos/
 |  `- secrets/
 |- receipts/
@@ -79,21 +86,33 @@ AUTH_PASSWORD='change-me-now' \
 ./ops/bootstrap/macos/bootstrap-auth.sh
 ```
 
-3. Run the bootstrap flow.
+3. Run the operator doctor before first bring-up.
+
+```bash
+./ops/bootstrap/macos/doctor.sh
+```
+
+4. Run the bootstrap flow.
 
 ```bash
 ./ops/bootstrap/macos/install.sh
 ./ops/bootstrap/macos/bringup.sh
 ```
 
-4. Optional: install the user LaunchAgent after the stack is healthy.
+5. Run the operator doctor again after bring-up to capture a post-start receipt.
+
+```bash
+./ops/bootstrap/macos/doctor.sh
+```
+
+6. Optional: install the user LaunchAgent after the stack is healthy.
 
 ```bash
 DRY_RUN=1 ./ops/bootstrap/macos/install-launchd.sh
 ./ops/bootstrap/macos/install-launchd.sh
 ```
 
-5. Optional: run a Restic backup once the stack has data.
+7. Optional: run a Restic backup once the stack has data.
 
 ```bash
 RESTIC_REPOSITORY=/path/to/restic-repo \
@@ -101,20 +120,41 @@ RESTIC_PASSWORD_FILE=/path/to/restic-password \
 ./ops/backups/restic/backup.sh
 ```
 
+## Operator Doctor
+
+`./ops/bootstrap/macos/doctor.sh` is the operator validation command for this repo.
+
+It writes a receipt bundle under `receipts/<timestamp>/` and validates, when applicable:
+
+- Docker command availability and daemon reachability
+- Tailscale command availability and tailnet IPv4 presence
+- Required local env files and auth bootstrap outputs
+- Compose file and mounted config presence
+- `docker compose config` for each stack
+- LaunchAgent template validity and installed LaunchAgent status when present
+- Container state and health for stacks that already have containers
+- Ingress and auth smoke behavior when Caddy and Authelia are running
+
+The doctor is intentionally safe to run both before and after `bringup.sh`.
+
 ## Smoke Verification Sequence
 
-This command sequence should produce green container and HTTP smoke checks once the local files are in place:
+This command sequence should produce green file validation, Compose validation, container health checks, and HTTP smoke checks once the local files are in place:
 
 ```bash
 cp stacks/core/env.example stacks/core/.env
 cp stacks/observability/env.example stacks/observability/.env
 cp stacks/ingress/env.example stacks/ingress/.env
+cp stacks/auth/env.example stacks/auth/.env
+cp stacks/auth/users_database.example.yml stacks/auth/users_database.yml
 AUTH_PASSWORD='change-me-now' ./ops/bootstrap/macos/bootstrap-auth.sh
+./ops/bootstrap/macos/doctor.sh
 ./ops/bootstrap/macos/install.sh
 ./ops/bootstrap/macos/bringup.sh
+./ops/bootstrap/macos/doctor.sh
 ```
 
-`bringup.sh` now checks the expected Compose service set for each stack and fails if an expected container is missing or lands in `created`, `dead`, `exited`, `restarting`, or `unhealthy` state.
+`bringup.sh` checks the expected Compose service set for each stack and fails if an expected container is missing or lands in `created`, `dead`, `exited`, `restarting`, or `unhealthy` state.
 
 ## Access Model
 
@@ -127,17 +167,19 @@ The default ingress path is localhost-bound:
 Default local smoke checks:
 
 ```bash
-curl -I --resolve grafana.internal:80:127.0.0.1 http://grafana.internal/
-curl -I --resolve prom.internal:80:127.0.0.1 http://prom.internal/
-curl -I --resolve auth.internal:80:127.0.0.1 http://auth.internal/api/health
+curl -k -I --resolve grafana.internal.home.arpa:8443:127.0.0.1 https://grafana.internal.home.arpa:8443/
+curl -k -I --resolve prom.internal.home.arpa:8443:127.0.0.1 https://prom.internal.home.arpa:8443/
+curl -k -I --resolve auth.internal.home.arpa:8443:127.0.0.1 https://auth.internal.home.arpa:8443/api/health
+curl -k -I --resolve loki.internal.home.arpa:8443:127.0.0.1 https://loki.internal.home.arpa:8443/ready
 ```
 
-If you want direct HTTP reachability from other tailnet nodes, set `TAILNET_BIND_IP` in `stacks/ingress/.env` to the host tailnet IP before running `bringup.sh`. That path is supported by the code but is not the default.
+If you want direct HTTPS reachability from other tailnet nodes, set `TAILNET_BIND_IP` in `stacks/ingress/.env` to the host tailnet IP before running `bringup.sh`. That path is supported by the code but is not the default.
 
-The scripted HTTP checks are smoke checks only:
+The scripted HTTPS checks are smoke checks only:
 
-- `auth.internal/api/health` must return `200`
-- Protected routes must return `302` with a redirect toward `auth.internal`
+- `auth.internal.home.arpa/api/health` must return `200`
+- Protected routes must return `302` with a redirect toward `auth.internal.home.arpa`
+- These checks use Caddy's local CA, so command-line smoke checks pass `-k` unless the local CA is trusted
 - These checks do not prove an interactive Authelia login flow or full browser usability
 
 ## Sample Receipt Tree
@@ -152,7 +194,15 @@ receipts/
 |  |- bringup.stderr.log
 |  `- bringup.stdout.log
 `- 20260305T150405Z/
+   |- auth-bootstrap-files.txt
+   |- auth-bootstrap-inputs.txt
+   |- auth-bootstrap-summary.txt
    |- bringup.log
+   |- doctor-checks.txt
+   |- doctor-containers.txt
+   |- doctor-launchd.txt
+   |- doctor-summary.txt
+   |- doctor-versions.txt
    |- endpoints.txt
    |- healthchecks.txt
    |- http-auth-portal.headers.txt

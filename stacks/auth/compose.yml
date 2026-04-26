@@ -2,14 +2,8 @@ services:
   authelia:
     image: authelia/authelia:4.39.8
     restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET: ${AUTHELIA_JWT_SECRET}
-      AUTHELIA_SESSION_SECRET: ${AUTHELIA_SESSION_SECRET}
-      AUTHELIA_STORAGE_ENCRYPTION_KEY: ${AUTHELIA_STORAGE_ENCRYPTION_KEY}
     volumes:
-      - ./authelia/configuration.yml:/config/configuration.yml:ro
+      - ./authelia/configuration.local.yml:/config/configuration.yml:ro
       - ./users_database.yml:/config/users_database.yml:ro
       - authelia-data:/data
     healthcheck:
@@ -28,4 +22,3 @@ networks:
   controlplane:
     external: true
     name: jcn-controlplane
-

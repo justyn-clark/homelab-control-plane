@@ -56,8 +56,8 @@ services:
     env_file:
       - .env
     environment:
-      GF_SERVER_ROOT_URL: http://grafana.internal
-      GF_SERVER_DOMAIN: grafana.internal
+      GF_SERVER_ROOT_URL: https://grafana.internal.home.arpa:8443
+      GF_SERVER_DOMAIN: grafana.internal.home.arpa
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
       GF_AUTH_PROXY_ENABLED: "true"
       GF_AUTH_PROXY_HEADER_NAME: Remote-User

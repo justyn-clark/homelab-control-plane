@@ -15,6 +15,8 @@ AUTH_ENV_FILE="${REPO_ROOT}/stacks/auth/.env"
 USERS_EXAMPLE_FILE="${REPO_ROOT}/stacks/auth/users_database.example.yml"
 USERS_FILE="${REPO_ROOT}/stacks/auth/users_database.yml"
 AUTH_COMPOSE_FILE="${REPO_ROOT}/stacks/auth/compose.yml"
+AUTH_CONFIG_TEMPLATE="${REPO_ROOT}/stacks/auth/authelia/configuration.yml"
+AUTH_CONFIG_FILE="${REPO_ROOT}/stacks/auth/authelia/configuration.local.yml"
 
 FORCE_REGENERATE="${FORCE_REGENERATE:-0}"
 AUTH_USERNAME="${AUTH_USERNAME:-admin}"
@@ -23,6 +25,7 @@ AUTH_EMAIL="${AUTH_EMAIL:-admin@example.internal}"
 AUTHELIA_DOMAIN_OVERRIDE="${AUTHELIA_DOMAIN:-}"
 AUTHELIA_DEFAULT_REDIRECTION_URL_OVERRIDE="${AUTHELIA_DEFAULT_REDIRECTION_URL:-}"
 AUTHELIA_PASSWORD_HASH_OVERRIDE="${AUTHELIA_PASSWORD_HASH:-}"
+AUTH_PASSWORD_HASH_FILE="${REPO_ROOT}/ops/secrets/authelia-password.hash"
 AUTH_PASSWORD="${AUTH_PASSWORD:-}"
 
 AUTHELIA_DOMAIN_VALUE=""
@@ -71,7 +74,7 @@ random_hex() {
 
 authelia_hash_image() {
   local image
-  image="$(awk '/image:[[:space:]]+authelia\\/authelia:/ {print $2; exit}' "${AUTH_COMPOSE_FILE}")"
+  image="$(awk '$1 == "image:" && $2 ~ /^authelia\/authelia:/ {print $2; exit}' "${AUTH_COMPOSE_FILE}")"
 
   if [[ -z "${image}" ]]; then
     echo "unable to determine Authelia image from ${AUTH_COMPOSE_FILE}" >&2
@@ -126,8 +129,40 @@ AUTHELIA_DEFAULT_REDIRECTION_URL=${AUTHELIA_DEFAULT_REDIRECTION_URL_VALUE}
 AUTHELIA_SESSION_SECRET=${AUTHELIA_SESSION_SECRET_VALUE}
 AUTHELIA_STORAGE_ENCRYPTION_KEY=${AUTHELIA_STORAGE_ENCRYPTION_KEY_VALUE}
 AUTHELIA_JWT_SECRET=${AUTHELIA_JWT_SECRET_VALUE}
-AUTHELIA_PASSWORD_HASH=${AUTHELIA_PASSWORD_HASH_VALUE}
 EOF
+}
+
+write_config_file() {
+  AUTH_CONFIG_TEMPLATE="${AUTH_CONFIG_TEMPLATE}" \
+  AUTH_CONFIG_FILE="${AUTH_CONFIG_FILE}" \
+  AUTHELIA_DOMAIN_VALUE="${AUTHELIA_DOMAIN_VALUE}" \
+  AUTHELIA_DEFAULT_REDIRECTION_URL_VALUE="${AUTHELIA_DEFAULT_REDIRECTION_URL_VALUE}" \
+  AUTHELIA_SESSION_SECRET_VALUE="${AUTHELIA_SESSION_SECRET_VALUE}" \
+  AUTHELIA_STORAGE_ENCRYPTION_KEY_VALUE="${AUTHELIA_STORAGE_ENCRYPTION_KEY_VALUE}" \
+  AUTHELIA_JWT_SECRET_VALUE="${AUTHELIA_JWT_SECRET_VALUE}" \
+  python3 - <<'PY'
+from os import environ
+from pathlib import Path
+src = Path(environ['AUTH_CONFIG_TEMPLATE'])
+dst = Path(environ['AUTH_CONFIG_FILE'])
+text = src.read_text()
+replacements = {
+    '${AUTHELIA_DOMAIN}': environ['AUTHELIA_DOMAIN_VALUE'],
+    '${AUTHELIA_DEFAULT_REDIRECTION_URL}': environ['AUTHELIA_DEFAULT_REDIRECTION_URL_VALUE'],
+    '${AUTHELIA_SESSION_SECRET}': environ['AUTHELIA_SESSION_SECRET_VALUE'],
+    '${AUTHELIA_STORAGE_ENCRYPTION_KEY}': environ['AUTHELIA_STORAGE_ENCRYPTION_KEY_VALUE'],
+    '${AUTHELIA_JWT_SECRET}': environ['AUTHELIA_JWT_SECRET_VALUE'],
+}
+for old, new in replacements.items():
+    text = text.replace(old, new)
+dst.write_text(text)
+PY
+}
+
+write_password_hash_file() {
+  mkdir -p "$(dirname "${AUTH_PASSWORD_HASH_FILE}")"
+  umask 077
+  printf '%s\n' "${AUTHELIA_PASSWORD_HASH_VALUE}" > "${AUTH_PASSWORD_HASH_FILE}"
 }
 
 write_users_file() {
@@ -142,14 +177,32 @@ users:
 EOF
 }
 
+users_file_needs_write() {
+  if [[ ! -f "${USERS_FILE}" ]]; then
+    return 0
+  fi
+
+  if grep -Fq '${AUTHELIA_PASSWORD_HASH}' "${USERS_FILE}"; then
+    return 0
+  fi
+
+  if grep -Fq 'replace-me' "${USERS_FILE}"; then
+    return 0
+  fi
+
+  return 1
+}
+
 validate_outputs() {
   require_file "${AUTH_ENV_FILE}"
   require_file "${USERS_FILE}"
+  require_file "${AUTH_CONFIG_FILE}"
+  require_file "${AUTH_PASSWORD_HASH_FILE}"
   grep -q '^AUTHELIA_SESSION_SECRET=' "${AUTH_ENV_FILE}"
   grep -q '^AUTHELIA_STORAGE_ENCRYPTION_KEY=' "${AUTH_ENV_FILE}"
   grep -q '^AUTHELIA_JWT_SECRET=' "${AUTH_ENV_FILE}"
-  grep -q '^AUTHELIA_PASSWORD_HASH=' "${AUTH_ENV_FILE}"
   grep -q "^  ${AUTH_USERNAME}:" "${USERS_FILE}"
+  ! grep -Fq '${AUTHELIA_' "${AUTH_CONFIG_FILE}"
 }
 
 write_receipts() {
@@ -169,6 +222,10 @@ auth_env_file=${AUTH_ENV_FILE}
 auth_env_status=$([[ -f "${AUTH_ENV_FILE}" ]] && echo present || echo missing)
 users_file=${USERS_FILE}
 users_file_status=$([[ -f "${USERS_FILE}" ]] && echo present || echo missing)
+auth_config_file=${AUTH_CONFIG_FILE}
+auth_config_status=$([[ -f "${AUTH_CONFIG_FILE}" ]] && echo present || echo missing)
+password_hash_file=${AUTH_PASSWORD_HASH_FILE}
+password_hash_file_status=$([[ -f "${AUTH_PASSWORD_HASH_FILE}" ]] && echo present || echo missing)
 AUTHELIA_SESSION_SECRET=${AUTHELIA_SESSION_SECRET_STATUS}
 AUTHELIA_STORAGE_ENCRYPTION_KEY=${AUTHELIA_STORAGE_ENCRYPTION_KEY_STATUS}
 AUTHELIA_JWT_SECRET=${AUTHELIA_JWT_SECRET_STATUS}
@@ -198,9 +255,11 @@ echo "receipt_dir=${RECEIPT_DIR}"
 require_cmd openssl
 require_cmd docker
 require_cmd awk
+require_cmd python3
 require_file "${AUTH_ENV_EXAMPLE}"
 require_file "${USERS_EXAMPLE_FILE}"
 require_file "${AUTH_COMPOSE_FILE}"
+require_file "${AUTH_CONFIG_TEMPLATE}"
 
 set_value_and_status \
   "$(read_env_value "${AUTH_ENV_FILE}" "AUTHELIA_DOMAIN")" \
@@ -232,7 +291,10 @@ set_value_and_status \
   AUTHELIA_JWT_SECRET_STATUS \
   AUTHELIA_JWT_SECRET_VALUE
 
-EXISTING_PASSWORD_HASH="$(read_env_value "${AUTH_ENV_FILE}" "AUTHELIA_PASSWORD_HASH")"
+EXISTING_PASSWORD_HASH=""
+if [[ -f "${AUTH_PASSWORD_HASH_FILE}" ]]; then
+  EXISTING_PASSWORD_HASH="$(cat "${AUTH_PASSWORD_HASH_FILE}")"
+fi
 if [[ "${FORCE_REGENERATE}" != "1" && -n "${EXISTING_PASSWORD_HASH}" && "${EXISTING_PASSWORD_HASH}" != "replace-me" ]]; then
   AUTHELIA_PASSWORD_HASH_VALUE="${EXISTING_PASSWORD_HASH}"
   AUTHELIA_PASSWORD_HASH_STATUS="preserved"
@@ -242,8 +304,10 @@ else
 fi
 
 write_env_file
+write_config_file
+write_password_hash_file
 
-if [[ "${FORCE_REGENERATE}" == "1" || ! -f "${USERS_FILE}" ]]; then
+if [[ "${FORCE_REGENERATE}" == "1" ]] || users_file_needs_write; then
   write_users_file
   USERS_WRITTEN=1
 fi

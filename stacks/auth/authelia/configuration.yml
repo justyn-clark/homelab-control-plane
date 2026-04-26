@@ -20,13 +20,13 @@ access_control:
   default_policy: deny
   rules:
     - domain:
-        - auth.internal
+        - auth.internal.home.arpa
       policy: bypass
     - domain:
-        - grafana.internal
-        - prom.internal
-        - prometheus.internal
-        - loki.internal
+        - grafana.internal.home.arpa
+        - prom.internal.home.arpa
+        - prometheus.internal.home.arpa
+        - loki.internal.home.arpa
       policy: one_factor
 
 session:
@@ -37,7 +37,7 @@ session:
   remember_me: 30d
   cookies:
     - domain: ${AUTHELIA_DOMAIN}
-      authelia_url: http://auth.internal
+      authelia_url: https://auth.internal.home.arpa:8443
       default_redirection_url: ${AUTHELIA_DEFAULT_REDIRECTION_URL}
 
 regulation:

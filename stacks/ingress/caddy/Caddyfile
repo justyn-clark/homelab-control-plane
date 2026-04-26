@@ -1,5 +1,4 @@
 {
-  auto_https off
   admin off
 }
 
@@ -10,30 +9,35 @@
   }
 }
 
-http://auth.internal {
+https://auth.internal.home.arpa {
+  tls internal
   reverse_proxy authelia:9091
 }
 
-http://grafana.internal {
+https://grafana.internal.home.arpa {
+  tls internal
   import authenticated
   reverse_proxy grafana:3000
 }
 
-http://prom.internal, http://prometheus.internal {
+https://prom.internal.home.arpa, https://prometheus.internal.home.arpa {
+  tls internal
   import authenticated
   reverse_proxy prometheus:9090
 }
 
-http://loki.internal {
+https://loki.internal.home.arpa {
+  tls internal
   import authenticated
   reverse_proxy loki:3100
 }
 
-http://agents.internal {
+https://agents.internal.home.arpa {
+  tls internal
   respond "reserved for future agents service" 404
 }
 
-http://ai.internal {
+https://ai.internal.home.arpa {
+  tls internal
   respond "reserved for future ai service" 404
 }
-
